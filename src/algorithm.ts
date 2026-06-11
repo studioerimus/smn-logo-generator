@@ -9,13 +9,13 @@ function mulberry32(seed: number) {
   }
 }
 
-export function gridParams(gridSize: 4 | 5 | 6) {
+export function gridParams(gridSize: 3 | 4 | 5 | 6, rRatio = 0.44) {
   const CANVAS  = 512
   const spacing = CANVAS / gridSize
   const offset  = spacing / 2
   const CELLS   = gridSize * gridSize
   const N       = Math.round(0.75 * CELLS)
-  const R       = spacing * 0.44
+  const R       = spacing * rRatio
 
   const centers: [number, number][] = []
   for (let row = 0; row < gridSize; row++)
@@ -78,8 +78,8 @@ function computeSigns(tour: number[], centers: [number, number][]): number[] {
   })
 }
 
-// Each arc in the output: all parameters needed by Canvas2D arc() and SVG A command.
-// ccw=true → Canvas2D counterclockwise=true; ccw=false → CW (counterclockwise=false).
+// Each arc: parameters for Canvas2D arc() and SVG A command.
+// ccw=true → Canvas2D counterclockwise=true; ccw=false → CW.
 export interface ArcSegment {
   cx: number; cy: number; r: number
   thetaEntry: number  // angle (radians) from center to entry point
@@ -89,11 +89,13 @@ export interface ArcSegment {
   extX: number; extY: number  // exit tangent point (arc end)
 }
 
+// Per-node radii allow variable circle sizes.
+// Tangent formula uses ri+rp for inner entry, ri+rn for inner exit.
 function buildArcs(
-  tour:    number[],
-  signs:   number[],
-  centers: [number, number][],
-  R:       number
+  tour:      number[],
+  signs:     number[],
+  centers:   [number, number][],
+  tourRadii: number[]
 ): ArcSegment[] {
   const n    = tour.length
   const arcs: ArcSegment[] = []
@@ -106,6 +108,10 @@ function buildArcs(
     const [px, py] = centers[tour[prev]]
     const [nx, ny] = centers[tour[next]]
 
+    const ri = tourRadii[i]
+    const rp = tourRadii[prev]
+    const rn = tourRadii[next]
+
     // ---- ENTRY ----
     const signOffP = -signs[i]
     const isInnerP = signs[prev] !== signs[i]
@@ -114,14 +120,14 @@ function buildArcs(
     const thetaPC = Math.atan2(dey, dex)
 
     const offsetP = isInnerP
-      ? Math.asin(Math.max(-1, Math.min(1, (2 * R) / Math.sqrt(dex * dex + dey * dey)))) - Math.PI / 2
+      ? Math.asin(Math.max(-1, Math.min(1, (ri + rp) / Math.sqrt(dex * dex + dey * dey)))) - Math.PI / 2
       : Math.PI / 2
 
     const phiP = thetaPC + signOffP * offsetP
     const cosP = Math.cos(phiP), sinP = Math.sin(phiP)
 
-    const entX = isInnerP ? cx - R * cosP : cx + R * cosP
-    const entY = isInnerP ? cy - R * sinP : cy + R * sinP
+    const entX = isInnerP ? cx - ri * cosP : cx + ri * cosP
+    const entY = isInnerP ? cy - ri * sinP : cy + ri * sinP
     const thetaEntry = Math.atan2(entY - cy, entX - cx)
 
     // ---- EXIT ----
@@ -132,43 +138,56 @@ function buildArcs(
     const thetaCN = Math.atan2(dyn, dxn)
 
     const offsetN = isInnerN
-      ? Math.asin(Math.max(-1, Math.min(1, (2 * R) / Math.sqrt(dxn * dxn + dyn * dyn)))) - Math.PI / 2
+      ? Math.asin(Math.max(-1, Math.min(1, (ri + rn) / Math.sqrt(dxn * dxn + dyn * dyn)))) - Math.PI / 2
       : Math.PI / 2
 
-    const phiN   = thetaCN + signOffN * offsetN
-    const thetaExit = phiN  // atan2(sin(phiN), cos(phiN)) = phiN
+    const phiN     = thetaCN + signOffN * offsetN
+    const thetaExit = phiN
 
-    const extX = cx + R * Math.cos(phiN)
-    const extY = cy + R * Math.sin(phiN)
+    const extX = cx + ri * Math.cos(phiN)
+    const extY = cy + ri * Math.sin(phiN)
 
-    // ccw: Canvas2D counterclockwise flag
-    // signs[i] > 0  → t1 adjusted >= t0 → increasing angle → CW on screen → ccw=false
-    // signs[i] <= 0 → t0 adjusted >= t1 → decreasing angle → CCW on screen → ccw=true
     const ccw = signs[i] <= 0
 
-    arcs.push({ cx, cy, r: R, thetaEntry, thetaExit, ccw, entX, entY, extX, extY })
+    arcs.push({ cx, cy, r: ri, thetaEntry, thetaExit, ccw, entX, entY, extX, extY })
   }
 
   return arcs
 }
 
 export interface GenerationResult {
-  arcs:     ArcSegment[]
-  circles:  [number, number][]
-  R:        number
-  CANVAS:   number
-  seed:     number
-  gridSize: 4 | 5 | 6
+  arcs:          ArcSegment[]
+  circles:       [number, number][]
+  R:             number
+  CANVAS:        number
+  seed:          number
+  gridSize:      3 | 4 | 5 | 6
+  rRatio:        number
+  sizeVariation: number
 }
 
-export function generate(seed: number, gridSize: 4 | 5 | 6): GenerationResult {
+// Per-step radius variation ranges (±fraction of base R)
+const VARIATION_RANGES = [0, 0.10, 0.20, 0.35, 0.50]
+
+export function generate(
+  seed:         number,
+  gridSize:     3 | 4 | 5 | 6,
+  rRatio        = 0.44,
+  sizeVariation = 1
+): GenerationResult {
   const rng = mulberry32(seed)
-  const { CANVAS, CELLS, N, R, centers } = gridParams(gridSize)
+  const { CANVAS, CELLS, N, R, centers } = gridParams(gridSize, rRatio)
 
   let tour = pickTour(rng, CELLS, N)
   tour = twoOpt(tour, centers)
   const signs = computeSigns(tour, centers)
-  const arcs  = buildArcs(tour, signs, centers, R)
 
-  return { arcs, circles: centers, R, CANVAS, seed, gridSize }
+  const range = VARIATION_RANGES[Math.max(0, Math.min(4, sizeVariation - 1))]
+  const tourRadii = tour.map(() =>
+    range === 0 ? R : Math.max(R * 0.2, R * (1 + (rng() * 2 - 1) * range))
+  )
+
+  const arcs = buildArcs(tour, signs, centers, tourRadii)
+
+  return { arcs, circles: centers, R, CANVAS, seed, gridSize, rRatio, sizeVariation }
 }

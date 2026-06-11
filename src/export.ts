@@ -14,23 +14,22 @@ function arcSpan(arc: ArcSegment): number {
 }
 
 
-function buildSVGPathWithLines(arcs: ArcSegment[], R: number): string {
+function buildSVGPathWithLines(arcs: ArcSegment[]): string {
   if (arcs.length === 0) return ''
-  const r   = R.toFixed(4)
   const fmt = (n: number) => n.toFixed(4)
 
   let d = `M ${fmt(arcs[0].entX)} ${fmt(arcs[0].entY)}`
 
   for (let i = 0; i < arcs.length; i++) {
     const arc      = arcs[i]
+    const r        = arc.r.toFixed(4)
     const span     = arcSpan(arc)
     const largeArc = span > Math.PI ? 1 : 0
     const sweep    = arc.ccw ? 0 : 1
     d += ` A ${r} ${r} 0 ${largeArc} ${sweep} ${fmt(arc.extX)} ${fmt(arc.extY)}`
 
-    // Tangent line to next arc's entry point
-    const next = arcs[(i + 1) % arcs.length]
     if (i < arcs.length - 1) {
+      const next = arcs[i + 1]
       d += ` L ${fmt(next.entX)} ${fmt(next.entY)}`
     }
   }
@@ -39,10 +38,10 @@ function buildSVGPathWithLines(arcs: ArcSegment[], R: number): string {
 }
 
 export function exportSVG(result: GenerationResult): void {
-  const { arcs, R, CANVAS, seed } = result
+  const { arcs, CANVAS, seed } = result
   if (arcs.length < 2) return
 
-  const pathD = buildSVGPathWithLines(arcs, R)
+  const pathD = buildSVGPathWithLines(arcs)
   const svg   = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${CANVAS}" height="${CANVAS}" viewBox="0 0 ${CANVAS} ${CANVAS}">
   <rect width="${CANVAS}" height="${CANVAS}" fill="white"/>
