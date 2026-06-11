@@ -1,22 +1,59 @@
-import type { GenerationResult } from './algorithm'
+import type { GenerationResult, ArcSegment } from './algorithm'
 import { drawMark } from './draw'
 
-export function exportSVG(result: GenerationResult): void {
-  const { poly, CANVAS, seed } = result
-  if (poly.length < 3) return
+// Arc span in [0, 2π] for large-arc-flag computation
+function arcSpan(arc: ArcSegment): number {
+  const TAU = Math.PI * 2
+  if (arc.ccw) {
+    // decreasing angle — span is entry minus exit (mod TAU)
+    return ((arc.thetaEntry - arc.thetaExit) % TAU + TAU) % TAU
+  } else {
+    // increasing angle — span is exit minus entry (mod TAU)
+    return ((arc.thetaExit - arc.thetaEntry) % TAU + TAU) % TAU
+  }
+}
 
-  const pts = poly.map(([x, y]) => `${x},${y}`).join(' ')
-  const svg = `<?xml version="1.0" encoding="UTF-8"?>
+
+function buildSVGPathWithLines(arcs: ArcSegment[], R: number): string {
+  if (arcs.length === 0) return ''
+  const r   = R.toFixed(4)
+  const fmt = (n: number) => n.toFixed(4)
+
+  let d = `M ${fmt(arcs[0].entX)} ${fmt(arcs[0].entY)}`
+
+  for (let i = 0; i < arcs.length; i++) {
+    const arc      = arcs[i]
+    const span     = arcSpan(arc)
+    const largeArc = span > Math.PI ? 1 : 0
+    const sweep    = arc.ccw ? 0 : 1
+    d += ` A ${r} ${r} 0 ${largeArc} ${sweep} ${fmt(arc.extX)} ${fmt(arc.extY)}`
+
+    // Tangent line to next arc's entry point
+    const next = arcs[(i + 1) % arcs.length]
+    if (i < arcs.length - 1) {
+      d += ` L ${fmt(next.entX)} ${fmt(next.entY)}`
+    }
+  }
+
+  return d + ' Z'
+}
+
+export function exportSVG(result: GenerationResult): void {
+  const { arcs, R, CANVAS, seed } = result
+  if (arcs.length < 2) return
+
+  const pathD = buildSVGPathWithLines(arcs, R)
+  const svg   = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${CANVAS}" height="${CANVAS}" viewBox="0 0 ${CANVAS} ${CANVAS}">
   <rect width="${CANVAS}" height="${CANVAS}" fill="white"/>
-  <polygon points="${pts}" fill="black"/>
+  <path d="${pathD}" fill="black" fill-rule="nonzero"/>
 </svg>`
   trigger(`somana-${seed}.svg`, svg, 'image/svg+xml')
 }
 
 export function exportPNG(result: GenerationResult): void {
-  const SIZE = 1920
-  const canvas = document.createElement('canvas')
+  const SIZE    = 1920
+  const canvas  = document.createElement('canvas')
   canvas.width  = SIZE
   canvas.height = SIZE
   const ctx = canvas.getContext('2d')!
@@ -40,3 +77,4 @@ function trigger(filename: string, content: string, mime: string): void {
   a.click()
   URL.revokeObjectURL(url)
 }
+

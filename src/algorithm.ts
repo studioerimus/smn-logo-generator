@@ -1,4 +1,4 @@
-// Mulberry32 seeded PRNG — drop-in replacement for Math.random()
+// Mulberry32 seeded PRNG
 function mulberry32(seed: number) {
   let s = seed >>> 0
   return () => {
@@ -9,9 +9,8 @@ function mulberry32(seed: number) {
   }
 }
 
-// Grid parameters — N = 75 % of cells, R = 44 % of cell spacing
 export function gridParams(gridSize: 4 | 5 | 6) {
-  const CANVAS = 512
+  const CANVAS  = 512
   const spacing = CANVAS / gridSize
   const offset  = spacing / 2
   const CELLS   = gridSize * gridSize
@@ -23,7 +22,7 @@ export function gridParams(gridSize: 4 | 5 | 6) {
     for (let col = 0; col < gridSize; col++)
       centers.push([offset + col * spacing, offset + row * spacing])
 
-  return { CANVAS, CELLS, N, R, spacing, centers }
+  return { CANVAS, CELLS, N, R, centers }
 }
 
 function dist(ax: number, ay: number, bx: number, by: number) {
@@ -31,7 +30,6 @@ function dist(ax: number, ay: number, bx: number, by: number) {
   return Math.sqrt(dx * dx + dy * dy)
 }
 
-// Fisher-Yates partial shuffle → pick N indices
 function pickTour(rng: () => number, cells: number, n: number): number[] {
   const pool = Array.from({ length: cells }, (_, i) => i)
   for (let i = 0; i < n; i++) {
@@ -41,7 +39,6 @@ function pickTour(rng: () => number, cells: number, n: number): number[] {
   return pool.slice(0, n)
 }
 
-// 2-opt improvement on cyclic tour
 function twoOpt(tour: number[], centers: [number, number][]): number[] {
   const n = tour.length
   let improved = true
@@ -68,7 +65,6 @@ function twoOpt(tour: number[], centers: [number, number][]): number[] {
   return tour
 }
 
-// Cross-product sign per vertex
 function computeSigns(tour: number[], centers: [number, number][]): number[] {
   const n = tour.length
   return Array.from({ length: n }, (_, i) => {
@@ -82,17 +78,25 @@ function computeSigns(tour: number[], centers: [number, number][]): number[] {
   })
 }
 
-// Build polygon vertices — direct port of brut-v-port.js
-function buildPoly(
-  tour: number[],
-  signs: number[],
+// Each arc in the output: all parameters needed by Canvas2D arc() and SVG A command.
+// ccw=true → Canvas2D counterclockwise=true; ccw=false → CW (counterclockwise=false).
+export interface ArcSegment {
+  cx: number; cy: number; r: number
+  thetaEntry: number  // angle (radians) from center to entry point
+  thetaExit:  number  // angle (radians) from center to exit point
+  ccw: boolean        // arc direction in Canvas2D terms
+  entX: number; entY: number  // entry tangent point (arc start)
+  extX: number; extY: number  // exit tangent point (arc end)
+}
+
+function buildArcs(
+  tour:    number[],
+  signs:   number[],
   centers: [number, number][],
-  R: number
-): [number, number][] {
-  const TAU = Math.PI * 2
-  const M   = 16
-  const n   = tour.length
-  const verts: [number, number][] = []
+  R:       number
+): ArcSegment[] {
+  const n    = tour.length
+  const arcs: ArcSegment[] = []
 
   for (let i = 0; i < n; i++) {
     const prev = (i - 1 + n) % n
@@ -109,22 +113,15 @@ function buildPoly(
     const dex = cx - px, dey = cy - py
     const thetaPC = Math.atan2(dey, dex)
 
-    let offsetP: number
-    if (isInnerP) {
-      const d = Math.sqrt(dex * dex + dey * dey)
-      const clamped = Math.max(-1, Math.min(1, (2 * R) / d))
-      offsetP = Math.asin(clamped) - Math.PI / 2
-    } else {
-      offsetP = Math.PI / 2
-    }
+    const offsetP = isInnerP
+      ? Math.asin(Math.max(-1, Math.min(1, (2 * R) / Math.sqrt(dex * dex + dey * dey)))) - Math.PI / 2
+      : Math.PI / 2
 
     const phiP = thetaPC + signOffP * offsetP
     const cosP = Math.cos(phiP), sinP = Math.sin(phiP)
 
     const entX = isInnerP ? cx - R * cosP : cx + R * cosP
     const entY = isInnerP ? cy - R * sinP : cy + R * sinP
-    verts.push([Math.round(entX), Math.round(entY)])
-
     const thetaEntry = Math.atan2(entY - cy, entX - cx)
 
     // ---- EXIT ----
@@ -134,44 +131,30 @@ function buildPoly(
     const dxn = nx - cx, dyn = ny - cy
     const thetaCN = Math.atan2(dyn, dxn)
 
-    let offsetN: number
-    if (isInnerN) {
-      const d = Math.sqrt(dxn * dxn + dyn * dyn)
-      const clamped = Math.max(-1, Math.min(1, (2 * R) / d))
-      offsetN = Math.asin(clamped) - Math.PI / 2
-    } else {
-      offsetN = Math.PI / 2
-    }
+    const offsetN = isInnerN
+      ? Math.asin(Math.max(-1, Math.min(1, (2 * R) / Math.sqrt(dxn * dxn + dyn * dyn)))) - Math.PI / 2
+      : Math.PI / 2
 
-    const phiN = thetaCN + signOffN * offsetN
-    const cosN = Math.cos(phiN), sinN = Math.sin(phiN)
+    const phiN   = thetaCN + signOffN * offsetN
+    const thetaExit = phiN  // atan2(sin(phiN), cos(phiN)) = phiN
 
-    const extX = cx + R * cosN
-    const extY = cy + R * sinN
-    const thetaExit = Math.atan2(sinN, cosN) // = phiN
+    const extX = cx + R * Math.cos(phiN)
+    const extY = cy + R * Math.sin(phiN)
 
-    // ---- Arc sweep ----
-    let t0 = thetaEntry, t1 = thetaExit
-    if (signs[i] > 0) {
-      if (t1 < t0) t1 += TAU
-    } else {
-      if (t0 < t1) t0 += TAU
-    }
+    // ccw: Canvas2D counterclockwise flag
+    // signs[i] > 0  → t1 adjusted >= t0 → increasing angle → CW on screen → ccw=false
+    // signs[i] <= 0 → t0 adjusted >= t1 → decreasing angle → CCW on screen → ccw=true
+    const ccw = signs[i] <= 0
 
-    for (let k = 1; k < M; k++) {
-      const t = t0 + (t1 - t0) * (k / M)
-      verts.push([Math.round(cx + R * Math.cos(t)), Math.round(cy + R * Math.sin(t))])
-    }
-
-    verts.push([Math.round(extX), Math.round(extY)])
+    arcs.push({ cx, cy, r: R, thetaEntry, thetaExit, ccw, entX, entY, extX, extY })
   }
 
-  return verts
+  return arcs
 }
 
 export interface GenerationResult {
-  poly:     [number, number][]
-  circles:  [number, number][]  // all grid centers
+  arcs:     ArcSegment[]
+  circles:  [number, number][]
   R:        number
   CANVAS:   number
   seed:     number
@@ -185,7 +168,7 @@ export function generate(seed: number, gridSize: 4 | 5 | 6): GenerationResult {
   let tour = pickTour(rng, CELLS, N)
   tour = twoOpt(tour, centers)
   const signs = computeSigns(tour, centers)
-  const poly  = buildPoly(tour, signs, centers, R)
+  const arcs  = buildArcs(tour, signs, centers, R)
 
-  return { poly, circles: centers, R, CANVAS, seed, gridSize }
+  return { arcs, circles: centers, R, CANVAS, seed, gridSize }
 }
