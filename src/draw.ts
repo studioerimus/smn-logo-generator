@@ -6,7 +6,7 @@ export function drawMark(
   showScaffold: boolean,
   displaySize:  number
 ): void {
-  const { arcs, circles, R, CANVAS } = result
+  const { arcs, circles, tourCenters, tourRadii, R, CANVAS } = result
   const s = displaySize / CANVAS
 
   ctx.clearRect(0, 0, displaySize, displaySize)
@@ -14,12 +14,24 @@ export function drawMark(
   ctx.fillRect(0, 0, displaySize, displaySize)
 
   if (showScaffold) {
-    ctx.strokeStyle = '#000000'
-    ctx.lineWidth   = 2 * s
-    ctx.fillStyle   = '#ffffff'
+    // All grid cells at base R — faint, shows grid structure
+    ctx.strokeStyle = '#cccccc'
+    ctx.lineWidth   = 1 * s
+    ctx.fillStyle   = '#f5f5f5'
     for (const [x, y] of circles) {
       ctx.beginPath()
       ctx.arc(x * s, y * s, R * s, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.stroke()
+    }
+    // Tour cells at their actual per-node radii — shows the geometry that drives the mark
+    ctx.strokeStyle = '#000000'
+    ctx.lineWidth   = 1.5 * s
+    ctx.fillStyle   = '#ffffff'
+    for (let i = 0; i < tourCenters.length; i++) {
+      const [x, y] = tourCenters[i]
+      ctx.beginPath()
+      ctx.arc(x * s, y * s, tourRadii[i] * s, 0, Math.PI * 2)
       ctx.fill()
       ctx.stroke()
     }

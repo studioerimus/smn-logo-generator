@@ -9,7 +9,7 @@ function mulberry32(seed: number) {
   }
 }
 
-export function gridParams(gridSize: 3 | 4 | 5 | 6, rRatio = 0.44) {
+export function gridParams(gridSize: 3 | 4 | 5, rRatio = 0.44) {
   const CANVAS  = 512
   const spacing = CANVAS / gridSize
   const offset  = spacing / 2
@@ -117,11 +117,14 @@ function buildArcs(
     const isInnerP = signs[prev] !== signs[i]
 
     const dex = cx - px, dey = cy - py
+    const distPC = Math.sqrt(dex * dex + dey * dey)
     const thetaPC = Math.atan2(dey, dex)
 
+    // Outer tangent: acos((rp-ri)/d) generalises π/2 (which holds only when rp=ri).
+    // Inner (crossing) tangent: asin((ri+rp)/d) - π/2, same as original but per-cell.
     const offsetP = isInnerP
-      ? Math.asin(Math.max(-1, Math.min(1, (ri + rp) / Math.sqrt(dex * dex + dey * dey)))) - Math.PI / 2
-      : Math.PI / 2
+      ? Math.asin(Math.max(-1, Math.min(1, (ri + rp) / distPC))) - Math.PI / 2
+      : Math.acos(Math.max(-1, Math.min(1, (rp - ri) / distPC)))
 
     const phiP = thetaPC + signOffP * offsetP
     const cosP = Math.cos(phiP), sinP = Math.sin(phiP)
@@ -135,11 +138,13 @@ function buildArcs(
     const isInnerN = signs[i] !== signs[next]
 
     const dxn = nx - cx, dyn = ny - cy
+    const distCN = Math.sqrt(dxn * dxn + dyn * dyn)
     const thetaCN = Math.atan2(dyn, dxn)
 
+    // Outer exit: acos((ri-rn)/d); inner exit: asin((ri+rn)/d) - π/2.
     const offsetN = isInnerN
-      ? Math.asin(Math.max(-1, Math.min(1, (ri + rn) / Math.sqrt(dxn * dxn + dyn * dyn)))) - Math.PI / 2
-      : Math.PI / 2
+      ? Math.asin(Math.max(-1, Math.min(1, (ri + rn) / distCN))) - Math.PI / 2
+      : Math.acos(Math.max(-1, Math.min(1, (ri - rn) / distCN)))
 
     const phiN     = thetaCN + signOffN * offsetN
     const thetaExit = phiN
@@ -157,11 +162,13 @@ function buildArcs(
 
 export interface GenerationResult {
   arcs:          ArcSegment[]
-  circles:       [number, number][]
+  circles:       [number, number][]  // all grid cell centers
+  tourCenters:   [number, number][]  // selected tour node centers
+  tourRadii:     number[]            // per-node radii that drive the geometry
   R:             number
   CANVAS:        number
   seed:          number
-  gridSize:      3 | 4 | 5 | 6
+  gridSize:      3 | 4 | 5
   rRatio:        number
   sizeVariation: number
 }
@@ -171,7 +178,7 @@ const VARIATION_RANGES = [0, 0.10, 0.20, 0.35, 0.50]
 
 export function generate(
   seed:         number,
-  gridSize:     3 | 4 | 5 | 6,
+  gridSize:     3 | 4 | 5,
   rRatio        = 0.44,
   sizeVariation = 1
 ): GenerationResult {
@@ -189,5 +196,7 @@ export function generate(
 
   const arcs = buildArcs(tour, signs, centers, tourRadii)
 
-  return { arcs, circles: centers, R, CANVAS, seed, gridSize, rRatio, sizeVariation }
+  const tourCenters = tour.map(idx => centers[idx]) as [number, number][]
+
+  return { arcs, circles: centers, tourCenters, tourRadii, R, CANVAS, seed, gridSize, rRatio, sizeVariation }
 }

@@ -9,7 +9,7 @@ const HISTORY_LIMIT = 20
 
 interface HistoryEntry {
   seed:          number
-  gridSize:      3 | 4 | 5 | 6
+  gridSize:      3 | 4 | 5
   rRatio:        number
   sizeVariation: number
   thumbnail:     string
@@ -124,7 +124,7 @@ function MarkCanvas({ result, showScaffold, canvasRef }: {
 // ── App ──────────────────────────────────────────────────────────────────────
 export default function App() {
   const [seed, setSeed]             = useState<number>(() => randomSeed())
-  const [gridSize, setGridSize]     = useState<3 | 4 | 5 | 6>(4)
+  const [gridSize, setGridSize]     = useState<3 | 4 | 5>(4)
   const [rRatio, setRRatio]         = useState(0.44)
   const [sizeVar, setSizeVar]       = useState(1)
   const [showScaffold, setScaffold] = useState(false)
@@ -182,7 +182,7 @@ export default function App() {
     }
   }, [stopAutoplay, randomiseStep])
 
-  const handleGridChange = useCallback((g: 3 | 4 | 5 | 6) => {
+  const handleGridChange = useCallback((g: 3 | 4 | 5) => {
     stopAutoplay()
     setGridSize(g)
     setResult(generate(latestRef.current.seed, g, latestRef.current.rRatio, latestRef.current.sizeVar))
@@ -254,14 +254,14 @@ export default function App() {
             label="Grid Size"
             value={gridSize}
             display={`${gridSize}×${gridSize}`}
-            min={3} max={6} step={1}
-            onChange={v => handleGridChange(v as 3 | 4 | 5 | 6)}
+            min={3} max={5} step={1}
+            onChange={v => handleGridChange(v as 3 | 4 | 5)}
           />
           <LabeledSlider
             label="Circle Size"
             value={rRatio}
             display={rRatio.toFixed(2)}
-            min={0.25} max={0.65} step={0.01}
+            min={0.25} max={0.5} step={0.01}
             onChange={handleRRatioChange}
           />
           <LabeledSlider
