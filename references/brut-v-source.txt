@@ -1,0 +1,533 @@
+﻿# Generative Dubins tour over a fully visible 4x4 grid of
+# circles. Each frame: pick N cells with Fisher-Yates, shorten the tour with
+# 2-opt, build the Dubins polygon, draw all 16 cells (white fill, black
+# stroke), then stamp the black polygon on top.
+
+
+.eqv CANVAS    512
+.eqv CELLS      16
+.eqv N          12
+.eqv R          56
+.eqv M          16
+
+
+.eqv TAU_BITS   0x40C90FDB
+.eqv HPI_BITS   0x3FC90FDB
+
+
+
+
+.data
+.align 2
+
+
+centers:
+   .word  64,  64,  192,  64,  320,  64,  448,  64
+   .word  64, 192,  192, 192,  320, 192,  448, 192
+   .word  64, 320,  192, 320,  320, 320,  448, 320
+   .word  64, 448,  192, 448,  320, 448,  448, 448
+
+
+tour:    .space 48
+signs:   .space 48
+pool:    .space 64
+poly:    .space 4096
+n_poly:  .word 0
+
+
+
+
+.text
+
+
+# Push (xreg, yreg) onto the polygon buffer; clobbers t0..t3.
+.macro PUSH_VERT %xreg %yreg
+   la       t0, n_poly
+   lw       t1, 0(t0)
+   la       t2, poly
+   slli     t3, t1, 3
+   add      t2, t2, t3
+   sw       %xreg, 0(t2)
+   sw       %yreg, 4(t2)
+   addi     t1, t1, 1
+   sw       t1, 0(t0)
+.end_macro
+
+
+# Load centers[tour[idx]] into (xreg, yreg); clobbers t0.
+.macro IDX_CENTER %xreg %yreg %tour_base %idx %centers_base
+   slli     t0, %idx, 2
+   add      t0, t0, %tour_base
+   lw       t0, 0(t0)
+   slli     t0, t0, 3
+   add      t0, t0, %centers_base
+   lw       %xreg, 0(t0)
+   lw       %yreg, 4(t0)
+.end_macro
+
+
+
+
+setup:
+   ISIZE       CANVAS, CANVAS
+   IBACKGROUND WHITE
+
+
+   # ============================================================
+   # 1. pool[k] = k for k in 0..CELLS-1
+   # ============================================================
+   la      s0, pool
+   li      t0, 0
+   li      t1, CELLS
+ds_init_pool:
+   sw      t0, 0(s0)
+   addi    s0, s0, 4
+   addi    t0, t0, 1
+   blt     t0, t1, ds_init_pool
+
+
+   # ============================================================
+   # 2. Partial Fisher-Yates: shuffle the first N entries
+   # ============================================================
+   la      s0, pool
+   li      s1, 0
+ds_fy_loop:
+   li      t0, N
+   bge     s1, t0, ds_fy_done
+   mv      a0, s1
+   li      a1, CELLS
+   addi    a1, a1, -1
+   __CALL_SAFE random_range
+   mv      s2, a0
+   slli    t0, s1, 2
+   add     t0, t0, s0
+   slli    t1, s2, 2
+   add     t1, t1, s0
+   lw      t2, 0(t0)
+   lw      t3, 0(t1)
+   sw      t3, 0(t0)
+   sw      t2, 0(t1)
+   addi    s1, s1, 1
+   j       ds_fy_loop
+ds_fy_done:
+
+
+   # ============================================================
+   # 3. Copy pool[0..N-1] -> tour[]
+   # ============================================================
+   la      s0, pool
+   la      s1, tour
+   li      t0, 0
+   li      t5, N
+ds_copy_tour:
+   bge     t0, t5, ds_copy_done
+   slli    t1, t0, 2
+   add     t2, t1, s0
+   add     t3, t1, s1
+   lw      t4, 0(t2)
+   sw      t4, 0(t3)
+   addi    t0, t0, 1
+   j       ds_copy_tour
+ds_copy_done:
+
+
+   # ============================================================
+   # 4. 2-opt: keep reversing tour[i+1..j] whenever it shortens
+   #    the cycle (delta = d(A,C) + d(B,D) - d(A,B) - d(C,D) < 0).
+   # ============================================================
+   la      s0, tour
+   la      s1, centers
+   li      s3, N
+   li      s2, 1
+
+
+ds_2opt_while:
+   beqz    s2, ds_2opt_done
+   li      s2, 0
+   li      s4, 0
+
+
+ds_2opt_outer:
+   addi    t0, s3, -1
+   bge     s4, t0, ds_2opt_while
+   addi    s5, s4, 2
+
+
+ds_2opt_inner:
+   bge     s5, s3, ds_2opt_outer_inc
+   # skip i==0, j==N-1 (would reverse the whole cycle)
+   bnez    s4, ds_2opt_compute
+   addi    t0, s3, -1
+   bne     s5, t0, ds_2opt_compute
+   addi    s5, s5, 1
+   j       ds_2opt_inner
+
+
+ds_2opt_compute:
+   addi    s11, s5, 1                  # (j+1) % N
+   bltu    s11, s3, ds_2opt_jp1_ok
+   li      s11, 0
+ds_2opt_jp1_ok:
+   addi    t4, s4, 1                   # i+1 (kept across DIST calls? no -> reload)
+
+
+   # A = tour[i], B = tour[i+1]
+   IDX_CENTER a0, a1, s0, s4, s1
+   addi    t4, s4, 1
+   IDX_CENTER a2, a3, s0, t4, s1
+   DIST    s8, a0, a1, a2, a3          # d(A, B)
+   # C = tour[j], D = tour[(j+1)%N]
+   IDX_CENTER a0, a1, s0, s5, s1
+   IDX_CENTER a2, a3, s0, s11, s1
+   DIST    s9, a0, a1, a2, a3          # d(C, D)
+   add     s8, s8, s9                  # current
+   # d(A, C)
+   IDX_CENTER a0, a1, s0, s4, s1
+   IDX_CENTER a2, a3, s0, s5, s1
+   DIST    s9, a0, a1, a2, a3
+   # d(B, D)
+   addi    t4, s4, 1
+   IDX_CENTER a0, a1, s0, t4, s1
+   IDX_CENTER a2, a3, s0, s11, s1
+   DIST    s10, a0, a1, a2, a3
+   add     s9, s9, s10                 # new
+
+
+   sub     t0, s9, s8
+   bgez    t0, ds_2opt_no_improve
+
+
+   # reverse tour[i+1 .. j]
+   addi    s6, s4, 1
+   mv      s7, s5
+ds_2opt_swap:
+   bge     s6, s7, ds_2opt_swap_done
+   slli    t0, s6, 2
+   add     t0, t0, s0
+   slli    t1, s7, 2
+   add     t1, t1, s0
+   lw      t2, 0(t0)
+   lw      t3, 0(t1)
+   sw      t3, 0(t0)
+   sw      t2, 0(t1)
+   addi    s6, s6,  1
+   addi    s7, s7, -1
+   j       ds_2opt_swap
+ds_2opt_swap_done:
+   li      s2, 1
+
+
+ds_2opt_no_improve:
+   addi    s5, s5, 1
+   j       ds_2opt_inner
+
+
+ds_2opt_outer_inc:
+   addi    s4, s4, 1
+   j       ds_2opt_outer
+
+
+ds_2opt_done:
+
+
+   # ============================================================
+   # 5. signs[i] = +1 if cross((curr-prev),(next-curr)).z > 0 else -1
+   # ============================================================
+   la      s0, tour
+   la      s1, centers
+   la      s2, signs
+   li      s3, 0
+   li      t6, N
+ds_sig_loop:
+   bge     s3, t6, ds_sig_done
+
+
+   addi    a4, s3, -1
+   bgez    a4, ds_sig_prev_ok
+   addi    a4, a4, N
+ds_sig_prev_ok:
+   addi    a5, s3, 1
+   bne     a5, t6, ds_sig_next_ok
+   li      a5, 0
+ds_sig_next_ok:
+
+
+   IDX_CENTER a0, a1, s0, a4, s1       # prev
+   IDX_CENTER a2, a3, s0, s3, s1       # curr
+   IDX_CENTER t2, t3, s0, a5, s1       # next
+
+
+   sub     t4, a2, a0
+   sub     t5, a3, a1
+   sub     a6, t2, a2
+   sub     a7, t3, a3
+   mul     t0, t4, a7
+   mul     t1, t5, a6
+   sub     t0, t0, t1
+
+
+   # branchless: sign = (cross > 0) ? +1 : -1
+   slt     t1, x0, t0                  # 1 if cross > 0 else 0
+   slli    t1, t1, 1
+   addi    t1, t1, -1                  # 1 or -1
+
+
+   slli    t0, s3, 2
+   add     t0, t0, s2
+   sw      t1, 0(t0)
+   addi    s3, s3, 1
+   j       ds_sig_loop
+ds_sig_done:
+
+
+   # ============================================================
+   # 6. Build polygon vertex buffer.
+   #    R_f is loop-invariant -> kept in fs4 across the whole loop.
+   # ============================================================
+   li       t0, R
+   fcvt.s.w fs4, t0                    # R_f hoisted
+
+
+   li      s2, 0                       # i = curr_idx
+
+
+ds_draw_loop:
+   li      t6, N
+   bge     s2, t6, ds_draw_done
+
+
+   addi    s4, s2, -1                  # prev
+   bgez    s4, ds_prev_ok
+   addi    s4, s4, N
+ds_prev_ok:
+   addi    s5, s2, 1                   # next
+   bltu    s5, t6, ds_next_ok
+   li      s5, 0
+ds_next_ok:
+
+
+   la      t4, tour
+   la      t5, centers
+   IDX_CENTER s8,  s9,  t4, s2, t5     # curr
+   IDX_CENTER s6,  s7,  t4, s4, t5     # prev
+   IDX_CENTER s10, s11, t4, s5, t5     # next
+
+
+   fcvt.s.w fs2, s8                    # curr.x_f
+   fcvt.s.w fs3, s9                    # curr.y_f
+
+
+   # ---- ENTRY (tangent prev -> curr) ----
+   la       t4, signs
+   slli     t0, s4, 2
+   add      t0, t0, t4
+   lw       t0, 0(t0)                  # prev_sign
+   slli     t1, s2, 2
+   add      t1, t1, t4
+   lw       t1, 0(t1)                  # curr_sign
+
+
+   neg      s0, t1                     # sign_off_p
+   xor      s1, t0, t1
+   snez     s1, s1                     # is_inner_p
+
+
+   sub      t2, s8, s6
+   sub      t3, s9, s7
+   fcvt.s.w fs5, t2                    # dx_f
+   fcvt.s.w fs6, t3                    # dy_f
+   ATAN2    fs0, fs6, fs5
+
+
+   beqz     s1, ds_ent_outer_off
+   fmul.s   ft0, fs5, fs5
+   fmul.s   ft1, fs6, fs6
+   fadd.s   ft0, ft0, ft1
+   fsqrt.s  ft0, ft0                   # d
+   fadd.s   ft1, fs4, fs4              # 2*R_f
+   fdiv.s   ft1, ft1, ft0              # 2R / d
+   ASIN     fs7, ft1
+   li       t0, HPI_BITS
+   fmv.w.x  ft0, t0
+   fsub.s   fs7, fs7, ft0               # offset_p
+   j        ds_ent_phi
+ds_ent_outer_off:
+   li       t0, HPI_BITS
+   fmv.w.x  fs7, t0                    # offset_p = pi/2
+
+
+ds_ent_phi:
+   fcvt.s.w ft0, s0
+   fmul.s   ft0, ft0, fs7
+   fadd.s   fs7, fs0, ft0               # phi_p
+
+
+   COS      fs5, fs7
+   SIN      fs6, fs7
+
+
+   fmul.s   ft0, fs4, fs5
+   fmul.s   ft1, fs4, fs6
+   beqz     s1, ds_ent_off_outer
+   fneg.s   fs5, ft0                   # offset = -R*cos (inner)
+   fneg.s   fs6, ft1
+   j        ds_ent_emit
+ds_ent_off_outer:
+   fmv.s    fs5, ft0                   # offset = +R*cos (outer)
+   fmv.s    fs6, ft1
+ds_ent_emit:
+   fadd.s   ft2, fs2, fs5
+   fadd.s   ft3, fs3, fs6
+   fcvt.w.s a0, ft2
+   fcvt.w.s a1, ft3
+   PUSH_VERT a0, a1
+
+
+   ATAN2    fs0, fs6, fs5              # theta_entry from actual offset
+
+
+   # ---- EXIT (tangent curr -> next) ----
+   la       t4, signs
+   slli     t0, s2, 2
+   add      t0, t0, t4
+   lw       t0, 0(t0)                  # curr_sign
+   slli     t1, s5, 2
+   add      t1, t1, t4
+   lw       t1, 0(t1)                  # next_sign
+
+
+   neg      s0, t1                     # sign_off_n
+   xor      s1, t0, t1
+   snez     s1, s1                     # is_inner_n
+
+
+   sub      t2, s10, s8
+   sub      t3, s11, s9
+   fcvt.s.w fs5, t2
+   fcvt.s.w fs6, t3
+   ATAN2    fs1, fs6, fs5
+
+
+   beqz     s1, ds_ext_outer_off
+   fmul.s   ft0, fs5, fs5
+   fmul.s   ft1, fs6, fs6
+   fadd.s   ft0, ft0, ft1
+   fsqrt.s  ft0, ft0
+   fadd.s   ft1, fs4, fs4              # 2*R_f
+   fdiv.s   ft1, ft1, ft0
+   ASIN     fs7, ft1
+   li       t0, HPI_BITS
+   fmv.w.x  ft0, t0
+   fsub.s   fs7, fs7, ft0
+   j        ds_ext_phi
+ds_ext_outer_off:
+   li       t0, HPI_BITS
+   fmv.w.x  fs7, t0
+
+
+ds_ext_phi:
+   fcvt.s.w ft0, s0
+   fmul.s   ft0, ft0, fs7
+   fadd.s   fs7, fs1, ft0               # phi_n
+
+
+   COS      fs5, fs7
+   SIN      fs6, fs7
+
+
+   fmul.s   ft0, fs4, fs5
+   fmul.s   ft1, fs4, fs6
+   fadd.s   fs5, fs2, ft0               # EXIT.x_f
+   fadd.s   fs6, fs3, ft1               # EXIT.y_f
+   ATAN2    fs1, ft1, ft0               # theta_exit
+
+
+   # ---- Arc sweep ----
+   la       t4, signs
+   slli     t0, s2, 2
+   add      t0, t0, t4
+   lw       s0, 0(t0)                  # curr_sign
+
+
+   li       t0, TAU_BITS
+   fmv.w.x  ft1, t0                    # 2*pi
+   bgtz     s0, ds_arc_pos
+   flt.s    t0, fs0, fs1
+   beqz     t0, ds_arc_ready
+   fadd.s   fs0, fs0, ft1
+   j        ds_arc_ready
+ds_arc_pos:
+   flt.s    t0, fs1, fs0
+   beqz     t0, ds_arc_ready
+   fadd.s   fs1, fs1, ft1
+
+
+ds_arc_ready:
+   li       s1, 1                      # k = 1
+ds_arc_loop:
+   li       t6, M
+   bge      s1, t6, ds_arc_done
+   fcvt.s.w ft2, s1
+   fcvt.s.w ft3, t6
+   fdiv.s   ft2, ft2, ft3
+   fsub.s   ft3, fs1, fs0
+   fmul.s   ft2, ft3, ft2
+   fadd.s   ft2, ft2, fs0               # theta
+   COS      ft3, ft2
+   SIN      ft4, ft2
+   fmul.s   ft3, ft3, fs4
+   fmul.s   ft4, ft4, fs4
+   fadd.s   ft3, ft3, fs2
+   fadd.s   ft4, ft4, fs3
+   fcvt.w.s a0, ft3
+   fcvt.w.s a1, ft4
+   PUSH_VERT a0, a1
+   addi     s1, s1, 1
+   j        ds_arc_loop
+ds_arc_done:
+
+
+   fcvt.w.s a0, fs5
+   fcvt.w.s a1, fs6
+   PUSH_VERT a0, a1                    # EXIT vertex
+
+
+   addi    s2, s2, 1
+   j       ds_draw_loop
+ds_draw_done:
+
+
+   # ============================================================
+   # 7. Draw all 16 grid circles (white fill, black stroke).
+   # ============================================================
+   ISTROKE         BLACK
+   ISTROKE_WEIGHT  2
+   IFILL           WHITE
+
+
+   la       s0, centers
+   li       s1, 0
+ds_circles_loop:
+   li       t6, CELLS
+   bge      s1, t6, ds_circles_done
+   LOAD_POINT a0, a1, s0, s1
+   li       a2, R
+   __CALL_SAFE circle
+   addi     s1, s1, 1
+   j        ds_circles_loop
+ds_circles_done:
+
+
+   # ============================================================
+   # 8. Stamp the polygon on top (one POLYGON call).
+   # ============================================================
+   ISTROKE         BLACK
+   ISTROKE_WEIGHT  2
+   IFILL           BLACK
+   la       s0, poly
+   la       t0, n_poly
+   lw       t1, 0(t0)
+   slli     t1, t1, 3
+   add      t1, t1, s0
+   POLYGON  s0, t1
+   ret

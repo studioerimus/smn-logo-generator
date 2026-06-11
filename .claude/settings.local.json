@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm create *)",
+      "Bash(npx create-vite@latest . --template react-ts)",
+      "Bash(npx create-vite@latest /tmp/somana-scaffold --template react-ts)",
+      "Read(//tmp/**)",
+      "Bash(cp -r /Users/erimus/Documents/somana-node-logo/tmp/somana-scaffold/* /Users/erimus/Documents/somana-node-logo/)",
+      "Bash(cp -r /Users/erimus/Documents/somana-node-logo/tmp/somana-scaffold/.gitignore /Users/erimus/Documents/somana-node-logo/)",
+      "Bash(rm -rf /Users/erimus/Documents/somana-node-logo/tmp)",
+      "Bash(npm install *)",
+      "Bash(npx tsc *)",
+      "Bash(curl -s http://localhost:5175)",
+      "Bash(npx playwright *)",
+      "Bash(node pw-check.mjs)",
+      "Bash(node -e \"require\\('/Users/erimus/Documents/somana-node-logo/node_modules/playwright/index.js'\\)\")",
+      "Bash(npm list *)",
+      "Bash(node /tmp/pw-app.cjs)",
+      "Bash(npm uninstall *)"
+    ]
+  }
+}
