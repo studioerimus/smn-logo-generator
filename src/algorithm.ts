@@ -1,202 +1,191 @@
-// Seeded LCG PRNG (Mulberry32)
+// Mulberry32 seeded PRNG — drop-in replacement for Math.random()
 function mulberry32(seed: number) {
-  return function () {
-    let t = (seed += 0x6d2b79f5)
-    t = Math.imul(t ^ (t >>> 15), t | 1)
+  let s = seed >>> 0
+  return () => {
+    s += 0x6d2b79f5
+    let t = Math.imul(s ^ (s >>> 15), s | 1)
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296
   }
 }
 
-export interface GeneratorParams {
-  seed: number
-  gridSize: number    // 4, 5, or 6
-  nodeCount: number   // 4..9
-  contrast: number    // 0..1  controls base radius fraction of cell spacing
-  sizeVariation: number // 0..1  controls per-cell radius variation
-}
+// Grid parameters — N = 75 % of cells, R = 44 % of cell spacing
+export function gridParams(gridSize: 4 | 5 | 6) {
+  const CANVAS = 512
+  const spacing = CANVAS / gridSize
+  const offset  = spacing / 2
+  const CELLS   = gridSize * gridSize
+  const N       = Math.round(0.75 * CELLS)
+  const R       = spacing * 0.44
 
-export interface GeneratorResult {
-  polygon: [number, number][]
-  circles: { x: number; y: number; r: number }[]
-  canvasSize: number
-}
+  const centers: [number, number][] = []
+  for (let row = 0; row < gridSize; row++)
+    for (let col = 0; col < gridSize; col++)
+      centers.push([offset + col * spacing, offset + row * spacing])
 
-const ARC_STEPS = 16
+  return { CANVAS, CELLS, N, R, spacing, centers }
+}
 
 function dist(ax: number, ay: number, bx: number, by: number) {
-  const dx = bx - ax
-  const dy = by - ay
+  const dx = bx - ax, dy = by - ay
   return Math.sqrt(dx * dx + dy * dy)
 }
 
-export function generate(params: GeneratorParams): GeneratorResult {
-  const { seed, gridSize, nodeCount, contrast, sizeVariation } = params
-  const rng = mulberry32(seed)
-
-  const CANVAS = 512
-  const cells = gridSize * gridSize
-  const N = Math.min(nodeCount, cells)
-
-  // Cell spacing
-  const margin = CANVAS / (gridSize + 1)
-  const spacing = (CANVAS - 2 * margin) / (gridSize - 1)
-
-  // Generate grid centers
-  const centersX: number[] = []
-  const centersY: number[] = []
-  for (let row = 0; row < gridSize; row++) {
-    for (let col = 0; col < gridSize; col++) {
-      centersX.push(margin + col * spacing)
-      centersY.push(margin + row * spacing)
-    }
-  }
-
-  // Per-cell radii
-  const baseR = spacing * (0.15 + contrast * 0.35) // 0.15..0.50 * spacing
-  const radii: number[] = []
-  for (let i = 0; i < cells; i++) {
-    const variation = (rng() * 2 - 1) * sizeVariation * baseR * 0.6
-    radii.push(Math.max(baseR * 0.3, baseR + variation))
-  }
-
-  // Fisher-Yates partial shuffle -> pick N cells
-  const pool: number[] = Array.from({ length: cells }, (_, i) => i)
-  for (let i = 0; i < N; i++) {
+// Fisher-Yates partial shuffle → pick N indices
+function pickTour(rng: () => number, cells: number, n: number): number[] {
+  const pool = Array.from({ length: cells }, (_, i) => i)
+  for (let i = 0; i < n; i++) {
     const j = i + Math.floor(rng() * (cells - i))
     ;[pool[i], pool[j]] = [pool[j], pool[i]]
   }
-  const tour = pool.slice(0, N)
+  return pool.slice(0, n)
+}
 
-  // 2-opt improvement on closed tour
+// 2-opt improvement on cyclic tour
+function twoOpt(tour: number[], centers: [number, number][]): number[] {
+  const n = tour.length
   let improved = true
   while (improved) {
     improved = false
-    for (let i = 0; i < N - 1; i++) {
-      for (let j = i + 2; j < N; j++) {
-        if (i === 0 && j === N - 1) continue
-        const jp1 = (j + 1) % N
-        const A = tour[i], B = tour[i + 1], C = tour[j], D = tour[jp1]
-        const current = dist(centersX[A], centersY[A], centersX[B], centersY[B])
-                      + dist(centersX[C], centersY[C], centersX[D], centersY[D])
-        const next    = dist(centersX[A], centersY[A], centersX[C], centersY[C])
-                      + dist(centersX[B], centersY[B], centersX[D], centersY[D])
-        if (next < current - 1e-10) {
-          // reverse tour[i+1..j]
+    for (let i = 0; i < n - 1; i++) {
+      for (let j = i + 2; j < n; j++) {
+        if (i === 0 && j === n - 1) continue
+        const jp1 = (j + 1) % n
+        const [ax, ay] = centers[tour[i]]
+        const [bx, by] = centers[tour[i + 1]]
+        const [cx, cy] = centers[tour[j]]
+        const [dx, dy] = centers[tour[jp1]]
+        const cur = dist(ax, ay, bx, by) + dist(cx, cy, dx, dy)
+        const nxt = dist(ax, ay, cx, cy) + dist(bx, by, dx, dy)
+        if (nxt < cur - 1e-10) {
           let lo = i + 1, hi = j
-          while (lo < hi) {
-            ;[tour[lo], tour[hi]] = [tour[hi], tour[lo]]
-            lo++; hi--
-          }
+          while (lo < hi) { ;[tour[lo], tour[hi]] = [tour[hi], tour[lo]]; lo++; hi-- }
           improved = true
         }
       }
     }
   }
+  return tour
+}
 
-  // Compute signs: +1 if cross(prev->curr, curr->next).z > 0 else -1
-  const signs: number[] = new Array(N)
-  for (let i = 0; i < N; i++) {
-    const prev = (i - 1 + N) % N
-    const next = (i + 1) % N
-    const cx = centersX[tour[i]], cy = centersY[tour[i]]
-    const px = centersX[tour[prev]], py = centersY[tour[prev]]
-    const nx = centersX[tour[next]], ny = centersY[tour[next]]
+// Cross-product sign per vertex
+function computeSigns(tour: number[], centers: [number, number][]): number[] {
+  const n = tour.length
+  return Array.from({ length: n }, (_, i) => {
+    const prev = (i - 1 + n) % n
+    const next = (i + 1) % n
+    const [px, py] = centers[tour[prev]]
+    const [cx, cy] = centers[tour[i]]
+    const [nx, ny] = centers[tour[next]]
     const cross = (cx - px) * (ny - cy) - (cy - py) * (nx - cx)
-    signs[i] = cross > 0 ? 1 : -1
-  }
+    return cross > 0 ? 1 : -1
+  })
+}
 
-  // Build polygon
-  const polygon: [number, number][] = []
+// Build polygon vertices — direct port of brut-v-port.js
+function buildPoly(
+  tour: number[],
+  signs: number[],
+  centers: [number, number][],
+  R: number
+): [number, number][] {
+  const TAU = Math.PI * 2
+  const M   = 16
+  const n   = tour.length
+  const verts: [number, number][] = []
 
-  for (let i = 0; i < N; i++) {
-    const prev = (i - 1 + N) % N
-    const next = (i + 1) % N
+  for (let i = 0; i < n; i++) {
+    const prev = (i - 1 + n) % n
+    const next = (i + 1) % n
 
-    const cx = centersX[tour[i]], cy = centersY[tour[i]]
-    const px = centersX[tour[prev]], py = centersY[tour[prev]]
-    const nx = centersX[tour[next]], ny = centersY[tour[next]]
-    const R = radii[tour[i]]
-    const Rprev = radii[tour[prev]]
-    const Rnext = radii[tour[next]]
+    const [cx, cy] = centers[tour[i]]
+    const [px, py] = centers[tour[prev]]
+    const [nx, ny] = centers[tour[next]]
 
-    // ---- ENTRY tangent (prev -> curr) ----
-    const sign_off_p = -signs[i]
-    const is_inner_p = signs[prev] !== signs[i]
+    // ---- ENTRY ----
+    const signOffP = -signs[i]
+    const isInnerP = signs[prev] !== signs[i]
 
-    const edx = cx - px, edy = cy - py
-    const baseAngle_p = Math.atan2(edy, edx)
+    const dex = cx - px, dey = cy - py
+    const thetaPC = Math.atan2(dey, dex)
 
-    let offset_p: number
-    if (is_inner_p) {
-      const d = Math.sqrt(edx * edx + edy * edy)
-      const sinVal = Math.min(1, (R + Rprev) / d)
-      offset_p = Math.asin(sinVal) - Math.PI / 2
+    let offsetP: number
+    if (isInnerP) {
+      const d = Math.sqrt(dex * dex + dey * dey)
+      const clamped = Math.max(-1, Math.min(1, (2 * R) / d))
+      offsetP = Math.asin(clamped) - Math.PI / 2
     } else {
-      offset_p = Math.PI / 2
+      offsetP = Math.PI / 2
     }
 
-    const phi_p = baseAngle_p + sign_off_p * offset_p
-    const entryX = cx + (is_inner_p ? -1 : 1) * R * Math.cos(phi_p)
-    const entryY = cy + (is_inner_p ? -1 : 1) * R * Math.sin(phi_p)
-    const theta_entry = Math.atan2(entryY - cy, entryX - cx)
+    const phiP = thetaPC + signOffP * offsetP
+    const cosP = Math.cos(phiP), sinP = Math.sin(phiP)
 
-    polygon.push([entryX, entryY])
+    const entX = isInnerP ? cx - R * cosP : cx + R * cosP
+    const entY = isInnerP ? cy - R * sinP : cy + R * sinP
+    verts.push([Math.round(entX), Math.round(entY)])
 
-    // ---- EXIT tangent (curr -> next) ----
-    const sign_off_n = -signs[next]
-    const is_inner_n = signs[i] !== signs[next]
+    const thetaEntry = Math.atan2(entY - cy, entX - cx)
 
-    const fdx = nx - cx, fdy = ny - cy
-    const baseAngle_n = Math.atan2(fdy, fdx)
+    // ---- EXIT ----
+    const signOffN = -signs[next]
+    const isInnerN = signs[i] !== signs[next]
 
-    let offset_n: number
-    if (is_inner_n) {
-      const d = Math.sqrt(fdx * fdx + fdy * fdy)
-      const sinVal = Math.min(1, (R + Rnext) / d)
-      offset_n = Math.asin(sinVal) - Math.PI / 2
+    const dxn = nx - cx, dyn = ny - cy
+    const thetaCN = Math.atan2(dyn, dxn)
+
+    let offsetN: number
+    if (isInnerN) {
+      const d = Math.sqrt(dxn * dxn + dyn * dyn)
+      const clamped = Math.max(-1, Math.min(1, (2 * R) / d))
+      offsetN = Math.asin(clamped) - Math.PI / 2
     } else {
-      offset_n = Math.PI / 2
+      offsetN = Math.PI / 2
     }
 
-    const phi_n = baseAngle_n + sign_off_n * offset_n
-    const exitX = cx + R * Math.cos(phi_n)
-    const exitY = cy + R * Math.sin(phi_n)
-    const theta_exit = Math.atan2(exitY - cy, exitX - cx)
+    const phiN = thetaCN + signOffN * offsetN
+    const cosN = Math.cos(phiN), sinN = Math.sin(phiN)
+
+    const extX = cx + R * cosN
+    const extY = cy + R * sinN
+    const thetaExit = Math.atan2(sinN, cosN) // = phiN
 
     // ---- Arc sweep ----
-    // Mirror the original: sign>0 → ensure t1>=t0; sign<=0 → ensure t0>=t1
-    const TAU = 2 * Math.PI
-    let t0 = theta_entry, t1 = theta_exit
-
+    let t0 = thetaEntry, t1 = thetaExit
     if (signs[i] > 0) {
       if (t1 < t0) t1 += TAU
     } else {
       if (t0 < t1) t0 += TAU
     }
 
-    for (let k = 1; k < ARC_STEPS; k++) {
-      const t = t0 + (t1 - t0) * (k / ARC_STEPS)
-      polygon.push([cx + R * Math.cos(t), cy + R * Math.sin(t)])
+    for (let k = 1; k < M; k++) {
+      const t = t0 + (t1 - t0) * (k / M)
+      verts.push([Math.round(cx + R * Math.cos(t)), Math.round(cy + R * Math.sin(t))])
     }
 
-    polygon.push([exitX, exitY])
+    verts.push([Math.round(extX), Math.round(extY)])
   }
 
-  const circles = tour.map(idx => ({
-    x: centersX[idx],
-    y: centersY[idx],
-    r: radii[idx],
-  }))
-
-  return { polygon, circles, canvasSize: CANVAS }
+  return verts
 }
 
-// Build SVG path string from polygon
-export function polygonToSVGPath(polygon: [number, number][]): string {
-  if (polygon.length === 0) return ''
-  const parts = polygon.map(([x, y], i) =>
-    `${i === 0 ? 'M' : 'L'}${x.toFixed(2)},${y.toFixed(2)}`
-  )
-  return parts.join(' ') + ' Z'
+export interface GenerationResult {
+  poly:     [number, number][]
+  circles:  [number, number][]  // all grid centers
+  R:        number
+  CANVAS:   number
+  seed:     number
+  gridSize: 4 | 5 | 6
+}
+
+export function generate(seed: number, gridSize: 4 | 5 | 6): GenerationResult {
+  const rng = mulberry32(seed)
+  const { CANVAS, CELLS, N, R, centers } = gridParams(gridSize)
+
+  let tour = pickTour(rng, CELLS, N)
+  tour = twoOpt(tour, centers)
+  const signs = computeSigns(tour, centers)
+  const poly  = buildPoly(tour, signs, centers, R)
+
+  return { poly, circles: centers, R, CANVAS, seed, gridSize }
 }

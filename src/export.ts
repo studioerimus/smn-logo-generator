@@ -1,58 +1,41 @@
-import type { GeneratorResult, GeneratorParams } from './algorithm'
-import { polygonToSVGPath, generate } from './algorithm'
+import type { GenerationResult } from './algorithm'
+import { drawMark } from './draw'
 
-export function exportSVG(result: GeneratorResult, seed: number) {
-  const { canvasSize, polygon } = result
-  const pathD = polygonToSVGPath(polygon)
+export function exportSVG(result: GenerationResult): void {
+  const { poly, CANVAS, seed } = result
+  if (poly.length < 3) return
+
+  const pts = poly.map(([x, y]) => `${x},${y}`).join(' ')
   const svg = `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="${canvasSize}" height="${canvasSize}" viewBox="0 0 ${canvasSize} ${canvasSize}">
-  <rect width="${canvasSize}" height="${canvasSize}" fill="white"/>
-  <path d="${pathD}" fill="black"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="${CANVAS}" height="${CANVAS}" viewBox="0 0 ${CANVAS} ${CANVAS}">
+  <rect width="${CANVAS}" height="${CANVAS}" fill="white"/>
+  <polygon points="${pts}" fill="black"/>
 </svg>`
-  download(`somana-seed-${seed}.svg`, svg, 'image/svg+xml')
+  trigger(`somana-${seed}.svg`, svg, 'image/svg+xml')
 }
 
-export function exportPNG(params: GeneratorParams) {
+export function exportPNG(result: GenerationResult): void {
   const SIZE = 1920
-  const result = generate(params)
   const canvas = document.createElement('canvas')
-  canvas.width = SIZE
+  canvas.width  = SIZE
   canvas.height = SIZE
   const ctx = canvas.getContext('2d')!
-  const scale = SIZE / result.canvasSize
-
-  ctx.fillStyle = '#ffffff'
-  ctx.fillRect(0, 0, SIZE, SIZE)
-
-  if (result.polygon.length >= 3) {
-    ctx.beginPath()
-    ctx.fillStyle = '#000000'
-    const [fx, fy] = result.polygon[0]
-    ctx.moveTo(fx * scale, fy * scale)
-    for (let i = 1; i < result.polygon.length; i++) {
-      const [x, y] = result.polygon[i]
-      ctx.lineTo(x * scale, y * scale)
-    }
-    ctx.closePath()
-    ctx.fill()
-  }
-
+  drawMark(ctx, result, false, SIZE)
   canvas.toBlob(blob => {
     if (!blob) return
     const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `somana-seed-${params.seed}.png`
+    const a   = document.createElement('a')
+    a.href     = url
+    a.download = `somana-${result.seed}.png`
     a.click()
     URL.revokeObjectURL(url)
   }, 'image/png')
 }
 
-function download(filename: string, content: string, mime: string) {
-  const blob = new Blob([content], { type: mime })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
+function trigger(filename: string, content: string, mime: string): void {
+  const url = URL.createObjectURL(new Blob([content], { type: mime }))
+  const a   = document.createElement('a')
+  a.href     = url
   a.download = filename
   a.click()
   URL.revokeObjectURL(url)

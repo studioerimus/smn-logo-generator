@@ -16,7 +16,15 @@
       "Bash(node -e \"require\\('/Users/erimus/Documents/somana-node-logo/node_modules/playwright/index.js'\\)\")",
       "Bash(npm list *)",
       "Bash(node /tmp/pw-app.cjs)",
-      "Bash(npm uninstall *)"
+      "Bash(npm uninstall *)",
+      "Bash(pkill -f \"vite --port\")",
+      "Bash(./node_modules/.bin/tsc *)",
+      "Bash(node_modules/.bin/tsc --noEmit)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(list\\(d.get\\('packages',{}\\).keys\\(\\)\\)[:5]\\)\")",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(list\\(d.get\\('dependencies',{}\\).keys\\(\\)\\)\\)\")",
+      "Bash(node_modules/.bin/tsc *)",
+      "Bash(npm run *)",
+      "Bash(git add *)"
     ]
   }
 }
