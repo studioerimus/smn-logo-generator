@@ -52,6 +52,21 @@ input[type='range'].slider::-moz-range-track { height: 2px; background: transpar
 .icon-btn { transition: background-color 150ms ease; }
 .icon-btn:hover { background-color: rgba(0,0,0,0.05) !important; }
 
+/* ── Password gate ───────────────────────────────────────────────────────── */
+.gate-input:focus { border-color: #143333 !important; }
+.gate-input::placeholder { color: #AAAAAA; }
+.gate-submit { transition: background-color 150ms ease; }
+.gate-submit:hover { background-color: #2D2D2D !important; }
+
+@keyframes gate-shake {
+  0%, 100% { transform: translateX(0); }
+  20%       { transform: translateX(-6px); }
+  40%       { transform: translateX(6px); }
+  60%       { transform: translateX(-4px); }
+  80%       { transform: translateX(4px); }
+}
+.gate-shake { animation: gate-shake 0.42s ease; }
+
 /* ── FavCard: show remove button on hover ────────────────────────────────── */
 .fav-remove {
   opacity: 0;
