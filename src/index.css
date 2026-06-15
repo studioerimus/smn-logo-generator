@@ -3,3 +3,62 @@
 *, *::before, *::after { box-sizing: border-box; }
 body { margin: 0; }
 #root { width: 100%; min-height: 100svh; }
+
+/* ── Custom range slider ─────────────────────────────────────────────────────
+   --v is set per-element to the fill percentage (0% → 100%)                */
+input[type='range'].slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 2px;
+  border-radius: 0;
+  outline: none;
+  cursor: pointer;
+  background: linear-gradient(to right, #1A1A1A var(--v, 0%), #DEDAD5 var(--v, 0%));
+  padding: 0;
+  margin: 0;
+}
+input[type='range'].slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #F4F3F0;
+  border: 1.5px solid #1A1A1A;
+  cursor: pointer;
+  margin-top: -5px; /* center 12px thumb on 2px track */
+}
+input[type='range'].slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #F4F3F0;
+  border: 1.5px solid #1A1A1A;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+input[type='range'].slider::-webkit-slider-runnable-track { height: 2px; }
+input[type='range'].slider::-moz-range-track { height: 2px; background: transparent; }
+
+/* ── Hover transitions ──────────────────────────────────────────────────────*/
+.btn-primary { transition: background-color 150ms ease; }
+.btn-primary:hover:not(:disabled) { background-color: #2D2D2D !important; }
+
+.btn-secondary { transition: background-color 150ms ease, border-color 150ms ease; }
+.btn-secondary:hover { background-color: rgba(0,0,0,0.04) !important; }
+
+.seg-btn { transition: background-color 150ms ease, color 150ms ease; }
+
+.icon-btn { transition: background-color 150ms ease; }
+.icon-btn:hover { background-color: rgba(0,0,0,0.05) !important; }
+
+/* ── FavCard: show remove button on hover ────────────────────────────────── */
+.fav-remove {
+  opacity: 0;
+  transition: opacity 100ms ease;
+  pointer-events: none;
+}
+.fav-card:hover .fav-remove {
+  opacity: 1;
+  pointer-events: auto;
+}

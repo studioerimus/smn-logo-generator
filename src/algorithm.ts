@@ -9,13 +9,14 @@ function mulberry32(seed: number) {
   }
 }
 
-export function gridParams(gridSize: 3 | 4 | 5, rRatio = 0.44) {
-  const CANVAS  = 512
-  const spacing = CANVAS / gridSize
-  const offset  = spacing / 2
-  const CELLS   = gridSize * gridSize
-  const N       = Math.round(0.75 * CELLS)
-  const R       = spacing * rRatio
+export function gridParams(gridSize: 4 | 5, rRatio = 0.45) {
+  const CANVAS   = 512
+  const margin   = CANVAS * 0.20          // 20% clearspace on every side; scales with CANVAS
+  const spacing  = (CANVAS - 2 * margin) / gridSize
+  const offset   = margin + spacing / 2   // first cell centre inset from edge
+  const CELLS    = gridSize * gridSize
+  const N        = Math.round(0.75 * CELLS)
+  const R        = spacing * rRatio
 
   const centers: [number, number][] = []
   for (let row = 0; row < gridSize; row++)
@@ -168,19 +169,16 @@ export interface GenerationResult {
   R:             number
   CANVAS:        number
   seed:          number
-  gridSize:      3 | 4 | 5
+  gridSize:      4 | 5
   rRatio:        number
-  sizeVariation: number
+  sizeVariation: number              // 0–1 continuous; maps to ±0–50% radius variation
 }
-
-// Per-step radius variation ranges (±fraction of base R)
-const VARIATION_RANGES = [0, 0.10, 0.20, 0.35, 0.50]
 
 export function generate(
   seed:         number,
-  gridSize:     3 | 4 | 5,
-  rRatio        = 0.44,
-  sizeVariation = 1
+  gridSize:     4 | 5,
+  rRatio        = 0.45,
+  sizeVariation = 0
 ): GenerationResult {
   const rng = mulberry32(seed)
   const { CANVAS, CELLS, N, R, centers } = gridParams(gridSize, rRatio)
@@ -189,7 +187,8 @@ export function generate(
   tour = twoOpt(tour, centers)
   const signs = computeSigns(tour, centers)
 
-  const range = VARIATION_RANGES[Math.max(0, Math.min(4, sizeVariation - 1))]
+  // sizeVariation 0–1 maps to ±0–50% radius variation per node
+  const range = sizeVariation * 0.5
   const tourRadii = tour.map(() =>
     range === 0 ? R : Math.max(R * 0.2, R * (1 + (rng() * 2 - 1) * range))
   )

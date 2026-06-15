@@ -24,7 +24,13 @@
       "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(list\\(d.get\\('dependencies',{}\\).keys\\(\\)\\)\\)\")",
       "Bash(node_modules/.bin/tsc *)",
       "Bash(npm run *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(node *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5177)",
+      "Bash(pkill -f \"vite --port 5177\")",
+      "Bash(pkill -f \"vite --port 5178\")",
+      "Bash(curl -s http://localhost:5173)"
     ]
   }
 }
